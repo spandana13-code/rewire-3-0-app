@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Rewire 3.0 — Strong with Sherni</title>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Inter', sans-serif; }
+  input:focus { outline: 2px solid #D99A0B; outline-offset: 1px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo } = React;
+const { createClient } = window.supabase;
+
+// ---- Supabase connection ----
+const SUPABASE_URL = "https://qwewomevylwwzvjerpxo.supabase.co";
+const SUPABASE_KEY = "sb_publishable__t2oQ21hEs93NSrUJsSLSQ_YYmnXNu1";
+const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ---- Design tokens ----
+const C = {
+  paper: "#FBF8F1", surface: "#FFFFFF", line: "#E7E1D2",
+  ink: "#2C2A22", inkSoft: "#726C5B", inkFaint: "#A39C89",
+  gold: "#D99A0B", goldSoft: "#F4E3B8",
+  jungle: "#3E6355", jungleSoft: "#DEE9E1",
+  brick: "#B84A3E", brickSoft: "#F3DFDA",
+};
+const inputStyle = {
+  padding: "12px 14px", borderRadius: 10, border: `1px solid ${C.line}`,
+  background: C.surface, color: C.ink, fontFamily: "'Inter', sans-serif", fontSize: 14,
+};
+
+// ---- Habits (merged from the guidelines doc + live tracking sheet) ----
+const PILLARS = [
+  { id: "mind", label: "Mind", habits: [
+    { id: "meditation", label: "Meditation", type: "toggle", points: 2, hint: "Min 10 minutes, any style" },
+    { id: "journaling", label: "Journaling", type: "toggle", points: 2, hint: "Gratitude, reflection or daily aims" },
+    { id: "pranayama", label: "Pranayama", type: "toggle", points: 1, hint: "Daily breathing practice" },
+  ]},
+  { id: "body", label: "Body", habits: [
+    { id: "training", label: "Physical activity", type: "toggle", points: 2, hint: "Workout session completed" },
+    { id: "steps", label: "Steps", type: "number", points: 1, unit: "steps", target: 10000, step: 500, hint: "10,000 a day" },
+    { id: "sleep", label: "Sleep", type: "number", points: 2, unit: "hrs", target: 7.25, step: 0.25, hint: "7h 15m, one full cycle" },
+    { id: "hydration", label: "Hydration", type: "number", points: 1, unit: "glasses", target: 8, step: 1, hint: "8–10 glasses" },
+    { id: "nutrition", label: "Nutrition log", type: "photo", points: 1, hint: "Photo of today's meals" },
+    { id: "supplementation", label: "Supplementation", type: "toggle", points: 2, hint: "Vitamin B12 and B3" },
+    { id: "malasana", label: "Malasana & sun exposure", type: "toggle", points: 1, hint: "Daily hold, plus 5 min sun exposure" },
+  ]},
+  { id: "growth", label: "Growth", habits: [
+    { id: "reading", label: "Reading", type: "number", points: 2, unit: "pages", target: 10, step: 1, hint: "Non-fiction preferred, 10 pages min" },
+    { id: "screentime", label: "Screen time & phone curfew", type: "toggle", points: 2, hint: "Under 1 hour on social apps" },
+  ]},
+];
+const ALL_HABITS = PILLARS.flatMap(p => p.habits);
+const MAX_DAILY_POINTS = ALL_HABITS.reduce((s, h) => s + h.points, 0);
+const WEEKLY_TARGET = 100;
+const TOTAL_DAYS = 60;
+const START_DATE = new Date("2026-07-20T00:00:00");
+
+function todayStr() { return new Date().toISOString().slice(0, 10); }
+function dayNumberFor(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  return Math.floor((d - START_DATE) / 86400000) + 1;
+}
+function currentDay() { return Math.min(TOTAL_DAYS, Math.max(1, dayNumberFor(todayStr()))); }
+function phaseForDay(day) { return day <= 20 ? "Foundation" : day <= 40 ? "Momentum" : "Mastery"; }
+
+// ---- Shared components ----
+function Trail({ day }) {
+  const segments = [{ name: "Foundation" }, { name: "Momentum" }, { name: "Mastery" }];
+  const pct = (day / TOTAL_DAYS) * 100;
+  const phase = phaseForDay(day);
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+        {segments.map(s => (
+          <span key={s.name} style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 12, fontWeight: 500, color: s.name === phase ? C.ink : C.inkFaint }}>{s.name}</span>
+        ))}
+      </div>
+      <div style={{ position: "relative", height: 8, borderRadius: 5, background: C.line }}>
+        <div style={{ position: "absolute", left: "33.33%", top: 0, bottom: 0, width: 1, background: C.paper }} />
+        <div style={{ position: "absolute", left: "66.66%", top: 0, bottom: 0, width: 1, background: C.paper }} />
+        <div style={{ width: `${pct}%`, height: "100%", borderRadius: 5, background: C.gold }} />
+        <div style={{ position: "absolute", left: `calc(${pct}% - 8px)`, top: -5, width: 18, height: 18, borderRadius: "50%", background: C.surface, border: `3px solid ${C.gold}` }} />
+      </div>
+    </div>
+  );
+}
+
+function Toggle({ checked, onChange }) {
+  return (
+    <button onClick={() => onChange(!checked)} style={{
+      width: 24, height: 24, borderRadius: "50%", flexShrink: 0,
+      border: `1.5px solid ${checked ? C.jungle : C.inkFaint}`,
+      background: checked ? C.jungle : "transparent",
+      display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+    }}>
+      {checked && <span style={{ color: C.surface, fontSize: 13, fontWeight: 700 }}>✓</span>}
+    </button>
+  );
+}
+
+function PhotoTile({ value, onChange, userId, day }) {
+  const [uploading, setUploading] = useState(false);
+  const inputId = useMemo(() => "photo-" + Math.random().toString(36).slice(2), []);
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    const path = `${userId}/day-${day}-${Date.now()}.jpg`;
+    const { error } = await sb.storage.from("nutrition-photos").upload(path, file, { upsert: true });
+    if (!error) {
+      const { data } = sb.storage.from("nutrition-photos").getPublicUrl(path);
+      onChange(data.publicUrl);
+    } else {
+      alert("Photo upload failed: " + error.message);
+    }
+    setUploading(false);
+  };
+  return (
+    <label htmlFor={inputId} style={{ cursor: "pointer" }}>
+      <input id={inputId} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFile} />
+      {uploading ? (
+        <div style={{ width: 40, height: 40, borderRadius: 8, border: `1.5px dashed ${C.inkFaint}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: C.inkFaint }}>…</div>
+      ) : value ? (
+        <img src={value} alt="Meal log" style={{ width: 40, height: 40, borderRadius: 8, objectFit: "cover" }} />
+      ) : (
+        <div style={{ width: 40, height: 40, borderRadius: 8, border: `1.5px dashed ${C.inkFaint}`, display: "flex", alignItems: "center", justifyContent: "center", color: C.inkFaint, fontSize: 16 }}>+</div>
+      )}
+    </label>
+  );
+}
+
+function HabitRow({ habit, value, onChange, last, userId, day }) {
+  const done = habit.type === "toggle" ? !!value : habit.type === "number" ? Number(value || 0) >= habit.target : !!value;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 0", borderBottom: last ? "none" : `1px solid ${C.line}` }}>
+      <Toggle checked={done} onChange={(v) => {
+        if (habit.type === "toggle") onChange(v);
+        else if (habit.type === "number") onChange(v ? habit.target : 0);
+        else onChange(v);
+      }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 500, color: C.ink }}>{habit.label}</span>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: C.gold }}>+{habit.points}</span>
+        </div>
+        <div style={{ fontSize: 12, color: C.inkFaint, marginTop: 2 }}>{habit.hint}</div>
+      </div>
+      {habit.type === "number" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <input type="number" step={habit.step} value={value || ""} onChange={(e) => onChange(e.target.value)} placeholder="0"
+            style={{ width: 70, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 8, padding: "6px 8px", color: C.ink, fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, textAlign: "right" }} />
+          <span style={{ fontSize: 11, color: C.inkFaint, width: 36 }}>{habit.unit}</span>
+        </div>
+      )}
+      {habit.type === "photo" && <PhotoTile value={value} onChange={onChange} userId={userId} day={day} />}
+    </div>
+  );
+}
+
+function StatChip({ label, value, tone }) {
+  const bg = tone === "gold" ? C.goldSoft : tone === "jungle" ? C.jungleSoft : C.paper;
+  const fg = tone === "gold" ? "#8A5F06" : tone === "jungle" ? "#274539" : C.ink;
+  return (
+    <div style={{ background: bg, borderRadius: 12, padding: "12px 14px", flex: 1 }}>
+      <div style={{ fontSize: 11, color: C.inkFaint, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</div>
+      <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 21, fontWeight: 600, color: fg, marginTop: 3 }}>{value}</div>
+    </div>
+  );
+}
+
+function RecapRow({ habit, value }) {
+  const done = habit.type === "toggle" ? !!value : habit.type === "number" ? Number(value || 0) >= habit.target : !!value;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0" }}>
+      <span style={{ width: 20, height: 20, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: done ? C.jungleSoft : C.brickSoft, color: done ? C.jungle : C.brick, fontSize: 12, fontWeight: 700 }}>{done ? "✓" : "✕"}</span>
+      <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 13, color: C.ink, flex: 1 }}>{habit.label}</span>
+      {habit.type === "number" && Number(value || 0) > 0 && (
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: C.inkFaint }}>{value}{habit.unit === "steps" ? "" : ` ${habit.unit}`}</span>
+      )}
+    </div>
+  );
+}
+
+function RecapCard({ values, day }) {
+  const earned = ALL_HABITS.reduce((sum, h) => {
+    const v = values[h.id];
+    const done = h.type === "toggle" ? !!v : h.type === "number" ? Number(v || 0) >= h.target : !!v;
+    return sum + (done ? h.points : 0);
+  }, 0);
+  const photo = values.nutrition;
+  return (
+    <div style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 16, padding: "1.5rem", marginBottom: 24 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 16 }}>
+        <div>
+          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 19, fontWeight: 700, color: C.ink }}>Day {day} recap</div>
+          <div style={{ fontSize: 12, color: C.inkFaint, marginTop: 2 }}>{phaseForDay(day)} phase</div>
+        </div>
+        <div style={{ background: C.goldSoft, color: "#8A5F06", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, padding: "6px 12px", borderRadius: 20 }}>{earned}/{MAX_DAILY_POINTS} pts</div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 20 }}>
+        {ALL_HABITS.map(h => <RecapRow key={h.id} habit={h} value={values[h.id]} />)}
+      </div>
+      {photo && (
+        <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 10 }}>
+          <img src={photo} alt="Meal log" style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover" }} />
+          <span style={{ fontSize: 12, color: C.inkFaint }}>Today's nutrition log</span>
+        </div>
+      )}
+      <div style={{ marginTop: 18, paddingTop: 16, borderTop: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 13, fontStyle: "italic", color: C.inkSoft }}>Small wins, stacked daily.</span>
+        <button style={{ padding: "8px 16px", borderRadius: 10, border: `1px solid ${C.line}`, background: C.paper, color: C.ink, fontFamily: "'Space Grotesk', sans-serif", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>Share recap</button>
+      </div>
+    </div>
+  );
+}
+
+// ---- Check-in tab ----
+function CheckIn({ session }) {
+  const day = currentDay();
+  const today = todayStr();
+  const [values, setValues] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await sb.from("daily_checkins").select("*").eq("user_id", session.user.id).eq("day", today).maybeSingle();
+      if (data) {
+        setValues({
+          meditation: data.meditation, journaling: data.journaling, pranayama: data.pranayama, training: data.training,
+          steps: data.steps || "", sleep: data.sleep || "", hydration: data.hydration || "",
+          nutrition: data.nutrition_photo_url, supplementation: data.supplementation, malasana: data.malasana,
+          reading: data.reading || "", screentime: data.screentime,
+        });
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  const set = (id, v) => { setValues(s => ({ ...s, [id]: v })); setSaved(false); };
+  const earned = ALL_HABITS.reduce((sum, h) => {
+    const v = values[h.id];
+    const done = h.type === "toggle" ? !!v : h.type === "number" ? Number(v || 0) >= h.target : !!v;
+    return sum + (done ? h.points : 0);
+  }, 0);
+
+  const handleSave = async () => {
+    setSaving(true);
+    const row = {
+      user_id: session.user.id, day: today,
+      meditation: !!values.meditation, journaling: !!values.journaling, pranayama: !!values.pranayama, training: !!values.training,
+      steps: Number(values.steps || 0), sleep: Number(values.sleep || 0), hydration: Number(values.hydration || 0),
+      nutrition_photo_url: values.nutrition || null, supplementation: !!values.supplementation, malasana: !!values.malasana,
+      reading: Number(values.reading || 0), screentime: !!values.screentime, points: earned,
+    };
+    const { error } = await sb.from("daily_checkins").upsert(row, { onConflict: "user_id,day" });
+    setSaving(false);
+    if (error) alert("Save failed: " + error.message); else setSaved(true);
+  };
+
+  if (loading) return <div style={{ color: C.inkFaint, fontSize: 13 }}>Loading today's check-in…</div>;
+
+  return (
+    <div>
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 12 }}>
+          <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, fontWeight: 600, color: C.ink }}>Day {day} of {TOTAL_DAYS}</span>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: C.gold }}>{earned}/{MAX_DAILY_POINTS} today</span>
+        </div>
+        <Trail day={day} />
+      </div>
+      {PILLARS.map(pillar => (
+        <div key={pillar.id} style={{ marginBottom: 22 }}>
+          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 12, fontWeight: 600, color: C.inkFaint, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>{pillar.label}</div>
+          <div>
+            {pillar.habits.map((h, i) => (
+              <HabitRow key={h.id} habit={h} value={values[h.id]} onChange={(v) => set(h.id, v)} last={i === pillar.habits.length - 1} userId={session.user.id} day={day} />
+            ))}
+          </div>
+        </div>
+      ))}
+      <button onClick={handleSave} disabled={saving} style={{ marginTop: 6, width: "100%", padding: "15px", borderRadius: 12, border: "none", background: saved ? C.jungle : C.ink, color: C.paper, fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 600, cursor: "pointer" }}>
+        {saving ? "Saving…" : saved ? "Saved ✓" : "Save today's check-in"}
+      </button>
+    </div>
+  );
+}
+
+// ---- Report card tab ----
+function ReportCard({ session }) {
+  const [checkins, setCheckins] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await sb.from("daily_checkins").select("*").eq("user_id", session.user.id).order("day");
+      setCheckins(data || []);
+      setLoading(false);
+    })();
+  }, []);
+
+  const day = currentDay();
+  const byDay = useMemo(() => { const m = {}; checkins.forEach(c => m[dayNumberFor(c.day)] = c); return m; }, [checkins]);
+  const totalPoints = checkins.reduce((s, c) => s + (c.points || 0), 0);
+
+  let streak = 0;
+  for (let d = day; d >= 1; d--) { const c = byDay[d]; if (c && c.points > 0) streak++; else break; }
+
+  const days = Array.from({ length: TOTAL_DAYS }, (_, i) => {
+    const d = i + 1;
+    if (d > day) return { day: d, pct: null };
+    const c = byDay[d];
+    return { day: d, pct: c ? Math.round((c.points / MAX_DAILY_POINTS) * 100) : 0 };
+  });
+
+  const weeks = Array.from({ length: 8 }, (_, w) => {
+    const start = w * 7 + 1;
+    if (start > day) return { week: w + 1, points: null };
+    let sum = 0;
+    for (let d = start; d <= Math.min(start + 6, day); d++) { const c = byDay[d]; if (c) sum += c.points || 0; }
+    return { week: w + 1, points: sum };
+  });
+
+  const recapValues = useMemo(() => {
+    const c = byDay[day];
+    if (!c) return {};
+    return {
+      meditation: c.meditation, journaling: c.journaling, pranayama: c.pranayama, training: c.training,
+      steps: c.steps, sleep: c.sleep, hydration: c.hydration, nutrition: c.nutrition_photo_url,
+      supplementation: c.supplementation, malasana: c.malasana, reading: c.reading, screentime: c.screentime,
+    };
+  }, [byDay, day]);
+
+  const cellColor = (pct) => pct === null ? C.line : pct >= 80 ? C.jungle : pct >= 50 ? C.gold : C.brick;
+
+  if (loading) return <div style={{ color: C.inkFaint, fontSize: 13 }}>Loading your report card…</div>;
+
+  return (
+    <div>
+      <RecapCard values={recapValues} day={day} />
+      <div style={{ display: "flex", gap: 10, marginBottom: 22 }}>
+        <StatChip label="Total points" value={totalPoints} tone="gold" />
+        <StatChip label="Streak" value={`${streak} days`} tone="jungle" />
+        <StatChip label="Phase" value={phaseForDay(day)} />
+      </div>
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 600, color: C.ink, marginBottom: 12 }}>60-day log</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(10, 1fr)", gap: 6 }}>
+          {days.map(d => <div key={d.day} title={`Day ${d.day}${d.pct !== null ? `: ${d.pct}%` : ""}`} style={{ aspectRatio: "1", borderRadius: 5, background: cellColor(d.pct) }} />)}
+        </div>
+        <div style={{ display: "flex", gap: 16, marginTop: 12, fontSize: 11, color: C.inkFaint }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: C.jungle, display: "inline-block" }} />80%+</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: C.gold, display: "inline-block" }} />50–79%</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: C.brick, display: "inline-block" }} />Under 50%</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: C.line, display: "inline-block" }} />Upcoming</span>
+        </div>
+      </div>
+      <div>
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 600, color: C.ink, marginBottom: 12 }}>Weekly totals · target {WEEKLY_TARGET}</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+          {weeks.map(w => (
+            <div key={w.week} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ width: 46, fontSize: 12, color: C.inkSoft, fontFamily: "'IBM Plex Mono', monospace" }}>Wk {w.week}</div>
+              <div style={{ flex: 1, height: 7, borderRadius: 4, background: C.line, overflow: "hidden" }}>
+                {w.points !== null && <div style={{ width: `${Math.min(100, w.points)}%`, height: "100%", background: w.points >= WEEKLY_TARGET ? C.jungle : C.gold }} />}
+              </div>
+              <div style={{ width: 36, textAlign: "right", fontSize: 12, fontFamily: "'IBM Plex Mono', monospace", color: w.points === null ? C.inkFaint : C.ink }}>{w.points === null ? "—" : w.points}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Admin tab ----
+function ClientCard({ client, onClick }) {
+  const behind = client.weekPts < 70;
+  return (
+    <button onClick={onClick} style={{ textAlign: "left", background: C.surface, border: `1px solid ${C.line}`, borderRadius: 14, padding: "16px", cursor: "pointer", display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+        <div>
+          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 600, color: C.ink }}>{client.name}</div>
+          <div style={{ fontSize: 12, color: C.inkFaint, marginTop: 2 }}>{client.phase} · Day {client.day}</div>
+        </div>
+        <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, background: client.checkedInToday ? C.jungleSoft : C.brickSoft, color: client.checkedInToday ? "#274539" : C.brick }}>{client.checkedInToday ? "Done" : "Pending"}</span>
+      </div>
+      <div>
+        <div style={{ height: 6, borderRadius: 4, background: C.line, overflow: "hidden" }}>
+          <div style={{ width: `${Math.min(100, client.weekPts)}%`, height: "100%", background: behind ? C.brick : client.weekPts >= WEEKLY_TARGET ? C.jungle : C.gold }} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: C.inkFaint }}>{client.weekPts}/{WEEKLY_TARGET} this week</span>
+          {behind && <span style={{ fontSize: 11, color: C.brick, fontWeight: 500 }}>Falling behind</span>}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function ClientDetail({ client, onBack }) {
+  return (
+    <div>
+      <button onClick={onBack} style={{ border: "none", background: "none", cursor: "pointer", padding: 0, marginBottom: 18, fontFamily: "'Space Grotesk', sans-serif", fontSize: 13, color: C.inkSoft }}>← All clients</button>
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, fontWeight: 700, color: C.ink }}>{client.name}</div>
+        <div style={{ fontSize: 12, color: C.inkFaint, marginTop: 2 }}>{client.phase} phase · Day {client.day} of {TOTAL_DAYS}</div>
+      </div>
+      <div style={{ display: "flex", gap: 10 }}>
+        <StatChip label="Total points" value={client.totalPoints.toLocaleString()} tone="gold" />
+        <StatChip label="Streak" value={`${client.streak} days`} tone="jungle" />
+        <StatChip label="This week" value={`${client.weekPts}/${WEEKLY_TARGET}`} />
+      </div>
+    </div>
+  );
+}
+
+function AdminView() {
+  const [clients, setClients] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      const { data: profiles } = await sb.from("profiles").select("*").eq("is_admin", false);
+      const { data: checkins } = await sb.from("daily_checkins").select("*");
+      const day = currentDay();
+      const today = todayStr();
+      const weekStart = Math.floor((day - 1) / 7) * 7 + 1;
+      const list = (profiles || []).map(p => {
+        const rows = (checkins || []).filter(c => c.user_id === p.id);
+        const totalPoints = rows.reduce((s, c) => s + (c.points || 0), 0);
+        const checkedInToday = rows.some(c => c.day === today);
+        let weekPts = 0;
+        const byDay = {};
+        rows.forEach(c => { const dn = dayNumberFor(c.day); byDay[dn] = c; if (dn >= weekStart && dn <= day) weekPts += c.points || 0; });
+        let streak = 0;
+        for (let d = day; d >= 1; d--) { const c = byDay[d]; if (c && c.points > 0) streak++; else break; }
+        return { id: p.id, name: p.name, phase: phaseForDay(day), day, weekPts, checkedInToday, totalPoints, streak };
+      });
+      setClients(list);
+      setLoading(false);
+    })();
+  }, []);
+
+  if (loading) return <div style={{ color: C.inkFaint, fontSize: 13 }}>Loading clients…</div>;
+  if (selected) return <ClientDetail client={selected} onBack={() => setSelected(null)} />;
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 10, marginBottom: 22 }}>
+        <StatChip label="Active clients" value={clients.length} />
+        <StatChip label="Checked in today" value={`${clients.filter(c => c.checkedInToday).length}/${clients.length}`} tone="jungle" />
+        <StatChip label="Falling behind" value={clients.filter(c => c.weekPts < 70).length} tone="gold" />
+      </div>
+      {clients.length === 0 ? (
+        <div style={{ color: C.inkFaint, fontSize: 13 }}>No clients have signed up yet.</div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          {clients.map(c => <ClientCard key={c.id} client={c} onClick={() => setSelected(c)} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Auth screen ----
+function AuthScreen() {
+  const [mode, setMode] = useState("signup");
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(""); setBusy(true);
+    if (mode === "signup") {
+      const { data, error } = await sb.auth.signUp({ email, password });
+      if (error) { setError(error.message); setBusy(false); return; }
+      if (data.user) {
+        const { error: profileError } = await sb.from("profiles").insert({ id: data.user.id, name, phone });
+        if (profileError) { setError(profileError.message); setBusy(false); return; }
+      }
+    } else {
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) { setError(error.message); setBusy(false); return; }
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div style={{ maxWidth: 380, margin: "0 auto", padding: "4rem 1.5rem 0" }}>
+      <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 26, fontWeight: 700, color: C.ink, marginBottom: 4 }}>Rewire <span style={{ color: C.gold }}>3.0</span></div>
+      <div style={{ fontSize: 12, color: C.inkFaint, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 28 }}>Strong with Sherni</div>
+      <div style={{ display: "flex", gap: 20, marginBottom: 20, borderBottom: `1px solid ${C.line}` }}>
+        {["signup", "login"].map(m => (
+          <button key={m} onClick={() => { setMode(m); setError(""); }} style={{ padding: "0 0 10px", border: "none", background: "none", cursor: "pointer", borderBottom: mode === m ? `2px solid ${C.ink}` : "2px solid transparent", color: mode === m ? C.ink : C.inkFaint, fontFamily: "'Space Grotesk', sans-serif", fontSize: 14, fontWeight: 500 }}>
+            {m === "signup" ? "Join the challenge" : "Log in"}
+          </button>
+        ))}
+      </div>
+      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {mode === "signup" && (
+          <React.Fragment>
+            <input placeholder="Your name" value={name} onChange={e => setName(e.target.value)} required style={inputStyle} />
+            <input placeholder="Phone number" value={phone} onChange={e => setPhone(e.target.value)} style={inputStyle} />
+          </React.Fragment>
+        )}
+        <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} required style={inputStyle} />
+        <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} style={inputStyle} />
+        {error && <div style={{ color: C.brick, fontSize: 12 }}>{error}</div>}
+        <button type="submit" disabled={busy} style={{ marginTop: 6, padding: "14px", borderRadius: 12, border: "none", background: C.ink, color: C.paper, fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 600, cursor: "pointer" }}>
+          {busy ? "Please wait…" : mode === "signup" ? "Create account" : "Log in"}
+        </button>
+        {mode === "signup" && <div style={{ fontSize: 11, color: C.inkFaint, textAlign: "center", marginTop: 4 }}>Check your email to confirm your account if prompted.</div>}
+      </form>
+    </div>
+  );
+}
+
+// ---- Root app ----
+function RewireApp() {
+  const [session, setSession] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [loadingSession, setLoadingSession] = useState(true);
+  const [tab, setTab] = useState("checkin");
+
+  useEffect(() => {
+    sb.auth.getSession().then(({ data }) => { setSession(data.session); setLoadingSession(false); });
+    const { data: listener } = sb.auth.onAuthStateChange((_event, s) => setSession(s));
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!session) { setProfile(null); return; }
+    sb.from("profiles").select("*").eq("id", session.user.id).maybeSingle().then(({ data }) => setProfile(data));
+  }, [session]);
+
+  if (loadingSession) return <div style={{ background: C.paper, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: C.inkFaint, fontFamily: "'Space Grotesk', sans-serif" }}>Loading…</div>;
+
+  if (!session) return <div style={{ background: C.paper, minHeight: "100vh" }}><AuthScreen /></div>;
+
+  const tabs = [
+    { id: "checkin", label: "Check-in" },
+    { id: "report", label: "Report card" },
+    ...(profile?.is_admin ? [{ id: "admin", label: "Admin" }] : []),
+  ];
+
+  return (
+    <div style={{ background: C.paper, minHeight: "100vh", padding: "0 0 3rem" }}>
+      <div style={{ maxWidth: 540, margin: "0 auto", padding: "2rem 1.5rem 0" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 28 }}>
+          <div>
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 26, fontWeight: 700, color: C.ink }}>Rewire <span style={{ color: C.gold }}>3.0</span></div>
+            <div style={{ fontSize: 12, color: C.inkFaint, letterSpacing: 1.2, textTransform: "uppercase", marginTop: 2 }}>Strong with Sherni</div>
+          </div>
+          <button onClick={() => sb.auth.signOut()} style={{ border: "none", background: "none", color: C.inkFaint, fontSize: 12, cursor: "pointer", fontFamily: "'Space Grotesk', sans-serif" }}>Log out</button>
+        </div>
+        <div style={{ display: "flex", gap: 24, marginBottom: 26, borderBottom: `1px solid ${C.line}` }}>
+          {tabs.map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)} style={{ padding: "0 0 12px", border: "none", background: "none", cursor: "pointer", borderBottom: tab === t.id ? `2px solid ${C.ink}` : "2px solid transparent", color: tab === t.id ? C.ink : C.inkFaint, fontFamily: "'Space Grotesk', sans-serif", fontSize: 14, fontWeight: 500 }}>{t.label}</button>
+          ))}
+        </div>
+        {tab === "checkin" && <CheckIn session={session} />}
+        {tab === "report" && <ReportCard session={session} />}
+        {tab === "admin" && profile?.is_admin && <AdminView />}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<RewireApp />);
+</script>
+</body>
+</html>
