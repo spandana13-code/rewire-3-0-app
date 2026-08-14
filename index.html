@@ -98,6 +98,7 @@ function dayNumberFor(dateStr) {
   return Math.floor((d - START_DATE) / 86400000) + 1;
 }
 function currentDay() { return Math.min(TOTAL_DAYS, Math.max(1, dayNumberFor(todayStr()))); }
+function weekForDay(d) { return Math.min(8, Math.max(1, Math.ceil(d / 7))); }
 function phaseForDay(day) { return day <= 20 ? "Foundation" : day <= 40 ? "Momentum" : "Mastery"; }
 
 // ---- Shared components ----
@@ -388,20 +389,26 @@ function CheckIn({ session }) {
 // ---- Report card tab ----
 function ReportCard({ session }) {
   const [checkins, setCheckins] = useState([]);
+  const [weeklyPhysique, setWeeklyPhysique] = useState([]);
   const [loading, setLoading] = useState(true);
   const day = currentDay();
   const [recapDay, setRecapDay] = useState(day);
 
   useEffect(() => {
     (async () => {
-      const { data } = await sb.from("daily_checkins").select("*").eq("user_id", session.user.id).order("day");
-      setCheckins(data || []);
+      const [{ data: dc }, { data: wc }] = await Promise.all([
+        sb.from("daily_checkins").select("*").eq("user_id", session.user.id).order("day"),
+        sb.from("weekly_checkins").select("*").eq("user_id", session.user.id),
+      ]);
+      setCheckins(dc || []);
+      setWeeklyPhysique(wc || []);
       setLoading(false);
     })();
   }, []);
 
   const byDay = useMemo(() => { const m = {}; checkins.forEach(c => m[dayNumberFor(c.day)] = c); return m; }, [checkins]);
-  const totalPoints = checkins.reduce((s, c) => s + (c.points || 0), 0);
+  const byWeek = useMemo(() => { const m = {}; weeklyPhysique.forEach(w => m[w.week] = w); return m; }, [weeklyPhysique]);
+  const totalPoints = checkins.reduce((s, c) => s + (c.points || 0), 0) + weeklyPhysique.reduce((s, w) => s + (w.points || 0), 0);
 
   let streak = 0;
   for (let d = day; d >= 1; d--) { const c = byDay[d]; if (c && c.points > 0) streak++; else break; }
@@ -414,11 +421,13 @@ function ReportCard({ session }) {
   });
 
   const weeks = Array.from({ length: 8 }, (_, w) => {
+    const wk = w + 1;
     const start = w * 7 + 1;
-    if (start > day) return { week: w + 1, points: null };
+    if (start > day) return { week: wk, points: null };
     let sum = 0;
     for (let d = start; d <= Math.min(start + 6, day); d++) { const c = byDay[d]; if (c) sum += c.points || 0; }
-    return { week: w + 1, points: sum };
+    sum += byWeek[wk]?.points || 0;
+    return { week: wk, points: sum };
   });
 
   const recapValues = useMemo(() => {
@@ -623,6 +632,66 @@ function AdminDayEditor({ client, day, setDay }) {
   );
 }
 
+function AdminWeeklyPhysique({ client }) {
+  const [weeks, setWeeks] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const currentWeekNum = weekForDay(currentDay());
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await sb.from("weekly_checkins").select("*").eq("user_id", client.id);
+      const map = {};
+      (data || []).forEach(w => { map[w.week] = { points: w.points || 0, photo_url: w.photo_url, notes: w.notes || "" }; });
+      setWeeks(map);
+      setLoading(false);
+    })();
+  }, [client.id]);
+
+  const setPoints = (wk, p) => { setWeeks(s => ({ ...s, [wk]: { ...(s[wk] || {}), points: p } })); setSaved(false); };
+
+  const handleSaveAll = async () => {
+    setSaving(true);
+    const rows = Array.from({ length: currentWeekNum }, (_, i) => i + 1).map(wk => ({
+      user_id: client.id, week: wk,
+      points: Number(weeks[wk]?.points || 0),
+      photo_url: weeks[wk]?.photo_url || null,
+      notes: weeks[wk]?.notes || null,
+    }));
+    const { error } = await sb.from("weekly_checkins").upsert(rows, { onConflict: "user_id,week" });
+    setSaving(false);
+    if (error) alert("Save failed: " + error.message); else setSaved(true);
+  };
+
+  if (loading) return null;
+
+  return (
+    <div style={{ marginTop: 24, borderTop: `1px solid ${C.line}`, paddingTop: 20 }}>
+      <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 600, color: C.ink, marginBottom: 4 }}>Weekly physique check</div>
+      <div style={{ fontSize: 11, color: C.inkFaint, marginBottom: 12 }}>5 pts per week — adjust as needed based on what they submitted.</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {Array.from({ length: currentWeekNum }, (_, i) => i + 1).map(wk => (
+          <div key={wk} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${C.line}` }}>
+            <span style={{ flex: 1, fontFamily: "'Space Grotesk', sans-serif", fontSize: 13, color: C.ink }}>Week {wk}</span>
+            {weeks[wk]?.photo_url ? (
+              <img src={weeks[wk].photo_url} alt={`Week ${wk} progress`} style={{ width: 32, height: 32, borderRadius: 6, objectFit: "cover" }} />
+            ) : (
+              <span style={{ fontSize: 11, color: C.inkFaint }}>via WhatsApp</span>
+            )}
+            <input type="number" value={weeks[wk]?.points ?? 0} onChange={(e) => setPoints(wk, e.target.value)}
+              style={{ width: 44, background: C.goldSoft, border: `1px solid ${C.goldSoft}`, borderRadius: 8, padding: "5px 6px", color: "#8A5F06", fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, textAlign: "right", fontWeight: 600 }} />
+            <span style={{ fontSize: 10, color: C.inkFaint, width: 24 }}>pts</span>
+          </div>
+        ))}
+      </div>
+      <button onClick={handleSaveAll} disabled={saving} style={{ marginTop: 12, padding: "9px 18px", borderRadius: 10, border: "none", background: saved ? C.jungle : C.ink, color: C.paper, fontFamily: "'Space Grotesk', sans-serif", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+        {saving ? "Saving…" : saved ? "Saved ✓" : "Save physique scores"}
+      </button>
+    </div>
+  );
+}
+
 function ClientDetail({ client, onBack }) {
   const [day, setDay] = useState(client.day);
   return (
@@ -638,6 +707,7 @@ function ClientDetail({ client, onBack }) {
         <StatChip label="This week" value={`${client.weekPts}/${WEEKLY_TARGET}`} />
       </div>
       <AdminDayEditor client={client} day={day} setDay={setDay} />
+      <AdminWeeklyPhysique client={client} />
     </div>
   );
 }
@@ -649,18 +719,26 @@ function AdminView() {
 
   useEffect(() => {
     (async () => {
-      const { data: profiles } = await sb.from("profiles").select("*").eq("is_admin", false);
-      const { data: checkins } = await sb.from("daily_checkins").select("*");
+      const [{ data: profiles }, { data: checkins }, { data: physique }] = await Promise.all([
+        sb.from("profiles").select("*").eq("is_admin", false),
+        sb.from("daily_checkins").select("*"),
+        sb.from("weekly_checkins").select("*"),
+      ]);
       const day = currentDay();
       const today = todayStr();
       const weekStart = Math.floor((day - 1) / 7) * 7 + 1;
+      const currentWeekNum = weekForDay(day);
       const list = (profiles || []).map(p => {
         const rows = (checkins || []).filter(c => c.user_id === p.id);
-        const totalPoints = rows.reduce((s, c) => s + (c.points || 0), 0);
+        const physiqueRows = (physique || []).filter(w => w.user_id === p.id);
+        const physiqueTotal = physiqueRows.reduce((s, w) => s + (w.points || 0), 0);
+        const totalPoints = rows.reduce((s, c) => s + (c.points || 0), 0) + physiqueTotal;
         const checkedInToday = rows.some(c => c.day === today);
         let weekPts = 0;
         const byDay = {};
         rows.forEach(c => { const dn = dayNumberFor(c.day); byDay[dn] = c; if (dn >= weekStart && dn <= day) weekPts += c.points || 0; });
+        const thisWeekPhysique = physiqueRows.find(w => w.week === currentWeekNum);
+        weekPts += thisWeekPhysique?.points || 0;
         let streak = 0;
         for (let d = day; d >= 1; d--) { const c = byDay[d]; if (c && c.points > 0) streak++; else break; }
         return { id: p.id, name: p.name, phase: phaseForDay(day), day, weekPts, checkedInToday, totalPoints, streak };
