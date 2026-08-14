@@ -8,6 +8,7 @@
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
   * { box-sizing: border-box; }
@@ -19,7 +20,7 @@
 <div id="root"></div>
 
 <script type="text/babel" data-presets="react">
-const { useState, useEffect, useMemo } = React;
+const { useState, useEffect, useMemo, useRef } = React;
 const { createClient } = window.supabase;
 
 // ---- Supabase connection ----
@@ -228,28 +229,63 @@ function RecapRow({ habit, value }) {
 }
 
 function RecapCard({ values, day, earned }) {
+  const contentRef = useRef(null);
+  const [sharing, setSharing] = useState(false);
   const photo = values.nutrition;
+
+  const handleShare = async () => {
+    if (!contentRef.current) return;
+    setSharing(true);
+    try {
+      const canvas = await html2canvas(contentRef.current, { backgroundColor: C.surface, scale: 2, useCORS: true });
+      canvas.toBlob(async (blob) => {
+        if (!blob) { setSharing(false); return; }
+        const file = new File([blob], `rewire-day-${day}.png`, { type: "image/png" });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          try { await navigator.share({ files: [file], title: `Rewire 3.0 — Day ${day}` }); }
+          catch (e) { /* user cancelled share sheet */ }
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url; a.download = `rewire-day-${day}.png`;
+          document.body.appendChild(a); a.click(); document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+        setSharing(false);
+      }, "image/png");
+    } catch (e) {
+      alert("Couldn't generate the image: " + e.message);
+      setSharing(false);
+    }
+  };
+
   return (
     <div style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 16, padding: "1.5rem", marginBottom: 24 }}>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 16 }}>
-        <div>
-          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 19, fontWeight: 700, color: C.ink }}>Day {day} recap</div>
-          <div style={{ fontSize: 12, color: C.inkFaint, marginTop: 2 }}>{phaseForDay(day)} phase</div>
+      <div ref={contentRef} style={{ background: C.surface }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 19, fontWeight: 700, color: C.ink }}>Day {day} recap</div>
+            <div style={{ fontSize: 12, color: C.inkFaint, marginTop: 2 }}>{phaseForDay(day)} phase</div>
+          </div>
+          <div style={{ background: C.goldSoft, color: "#8A5F06", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, padding: "6px 12px", borderRadius: 20 }}>{earned}/{MAX_DAILY_POINTS} pts</div>
         </div>
-        <div style={{ background: C.goldSoft, color: "#8A5F06", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, padding: "6px 12px", borderRadius: 20 }}>{earned}/{MAX_DAILY_POINTS} pts</div>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 20 }}>
-        {ALL_HABITS.map(h => <RecapRow key={h.id} habit={h} value={values[h.id]} />)}
-      </div>
-      {photo && (
-        <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 10 }}>
-          <img src={photo} alt="Meal log" style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover" }} />
-          <span style={{ fontSize: 12, color: C.inkFaint }}>Today's nutrition log</span>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 20 }}>
+          {ALL_HABITS.map(h => <RecapRow key={h.id} habit={h} value={values[h.id]} />)}
         </div>
-      )}
-      <div style={{ marginTop: 18, paddingTop: 16, borderTop: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 13, fontStyle: "italic", color: C.inkSoft }}>Small wins, stacked daily.</span>
-        <button style={{ padding: "8px 16px", borderRadius: 10, border: `1px solid ${C.line}`, background: C.paper, color: C.ink, fontFamily: "'Space Grotesk', sans-serif", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>Share recap</button>
+        {photo && (
+          <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 10 }}>
+            <img src={photo} alt="Meal log" crossOrigin="anonymous" style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover" }} />
+            <span style={{ fontSize: 12, color: C.inkFaint }}>Today's nutrition log</span>
+          </div>
+        )}
+        <div style={{ marginTop: 18, paddingTop: 16, borderTop: `1px solid ${C.line}` }}>
+          <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 13, fontStyle: "italic", color: C.inkSoft }}>Small wins, stacked daily.</span>
+        </div>
+      </div>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+        <button onClick={handleShare} disabled={sharing} style={{ padding: "8px 16px", borderRadius: 10, border: `1px solid ${C.line}`, background: C.paper, color: C.ink, fontFamily: "'Space Grotesk', sans-serif", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+          {sharing ? "Preparing…" : "Share recap"}
+        </button>
       </div>
     </div>
   );
