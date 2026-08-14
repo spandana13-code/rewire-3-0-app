@@ -389,6 +389,8 @@ function CheckIn({ session }) {
 function ReportCard({ session }) {
   const [checkins, setCheckins] = useState([]);
   const [loading, setLoading] = useState(true);
+  const day = currentDay();
+  const [recapDay, setRecapDay] = useState(day);
 
   useEffect(() => {
     (async () => {
@@ -398,7 +400,6 @@ function ReportCard({ session }) {
     })();
   }, []);
 
-  const day = currentDay();
   const byDay = useMemo(() => { const m = {}; checkins.forEach(c => m[dayNumberFor(c.day)] = c); return m; }, [checkins]);
   const totalPoints = checkins.reduce((s, c) => s + (c.points || 0), 0);
 
@@ -421,14 +422,14 @@ function ReportCard({ session }) {
   });
 
   const recapValues = useMemo(() => {
-    const c = byDay[day];
+    const c = byDay[recapDay];
     if (!c) return {};
     return {
       meditation: c.meditation, journaling: c.journaling, pranayama: c.pranayama, training: c.training,
       steps: c.steps, sleep: c.sleep, hydration: c.hydration, nutrition: c.nutrition_photo_url,
       supplementation: c.supplementation, malasana: c.malasana, reading: c.reading, screentime: c.screentime,
     };
-  }, [byDay, day]);
+  }, [byDay, recapDay]);
 
   const cellColor = (pct) => pct === null ? C.line : pct >= 80 ? C.jungle : pct >= 50 ? C.gold : C.brick;
 
@@ -436,7 +437,12 @@ function ReportCard({ session }) {
 
   return (
     <div>
-      <RecapCard values={recapValues} day={day} earned={byDay[day]?.points ?? 0} />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, marginBottom: 10 }}>
+        <button onClick={() => setRecapDay(d => Math.max(1, d - 1))} disabled={recapDay <= 1} style={{ width: 26, height: 26, borderRadius: 8, border: `1px solid ${C.line}`, background: C.surface, cursor: recapDay <= 1 ? "default" : "pointer", color: recapDay <= 1 ? C.inkFaint : C.ink }}>‹</button>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: C.inkFaint }}>{recapDay === day ? "Today" : `Day ${recapDay}`}</span>
+        <button onClick={() => setRecapDay(d => Math.min(day, d + 1))} disabled={recapDay >= day} style={{ width: 26, height: 26, borderRadius: 8, border: `1px solid ${C.line}`, background: C.surface, cursor: recapDay >= day ? "default" : "pointer", color: recapDay >= day ? C.inkFaint : C.ink }}>›</button>
+      </div>
+      <RecapCard values={recapValues} day={recapDay} earned={byDay[recapDay]?.points ?? 0} />
       <div style={{ display: "flex", gap: 10, marginBottom: 22 }}>
         <StatChip label="Total points" value={totalPoints} tone="gold" />
         <StatChip label="Streak" value={`${streak} days`} tone="jungle" />
