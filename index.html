@@ -293,17 +293,20 @@ function RecapCard({ values, day, earned }) {
 
 // ---- Check-in tab ----
 function CheckIn({ session }) {
-  const day = currentDay();
-  const today = todayStr();
+  const todayNum = currentDay();
+  const [viewDay, setViewDay] = useState(todayNum);
   const [values, setValues] = useState({});
   const [habitPoints, setHabitPoints] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const isToday = viewDay === todayNum;
 
   useEffect(() => {
+    setLoading(true);
+    setSaved(false);
     (async () => {
-      const { data } = await sb.from("daily_checkins").select("*").eq("user_id", session.user.id).eq("day", today).maybeSingle();
+      const { data } = await sb.from("daily_checkins").select("*").eq("user_id", session.user.id).eq("day", dateForDay(viewDay)).maybeSingle();
       if (data) {
         setValues({
           meditation: data.meditation, journaling: data.journaling, pranayama: data.pranayama, training: data.training,
@@ -312,10 +315,13 @@ function CheckIn({ session }) {
           reading: data.reading || "", screentime: data.screentime,
         });
         setHabitPoints(data.habit_points || {});
+      } else {
+        setValues({});
+        setHabitPoints({});
       }
       setLoading(false);
     })();
-  }, []);
+  }, [viewDay]);
 
   const set = (id, v) => { setValues(s => ({ ...s, [id]: v })); setSaved(false); };
   const resolved = resolveHabitPoints(values, habitPoints);
@@ -325,7 +331,7 @@ function CheckIn({ session }) {
     setSaving(true);
     const newHabitPoints = resolveHabitPoints(values, habitPoints);
     const row = {
-      user_id: session.user.id, day: today,
+      user_id: session.user.id, day: dateForDay(viewDay),
       meditation: !!values.meditation, journaling: !!values.journaling, pranayama: !!values.pranayama, training: !!values.training,
       steps: Number(values.steps || 0), sleep: Number(values.sleep || 0), hydration: Number(values.hydration || 0),
       nutrition_photo_url: values.nutrition || null, supplementation: !!values.supplementation, malasana: !!values.malasana,
@@ -337,30 +343,44 @@ function CheckIn({ session }) {
     if (error) alert("Save failed: " + error.message); else { setHabitPoints(newHabitPoints); setSaved(true); }
   };
 
-  if (loading) return <div style={{ color: C.inkFaint, fontSize: 13 }}>Loading today's check-in…</div>;
-
   return (
     <div>
       <div style={{ marginBottom: 24 }}>
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 12 }}>
-          <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, fontWeight: 600, color: C.ink }}>Day {day} of {TOTAL_DAYS}</span>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: C.gold }}>{earned}/{MAX_DAILY_POINTS} today</span>
-        </div>
-        <Trail day={day} />
-      </div>
-      {PILLARS.map(pillar => (
-        <div key={pillar.id} style={{ marginBottom: 22 }}>
-          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 12, fontWeight: 600, color: C.inkFaint, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>{pillar.label}</div>
-          <div>
-            {pillar.habits.map((h, i) => (
-              <HabitRow key={h.id} habit={h} value={values[h.id]} onChange={(v) => set(h.id, v)} last={i === pillar.habits.length - 1} userId={session.user.id} day={day} />
-            ))}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button onClick={() => setViewDay(d => Math.max(1, d - 1))} disabled={viewDay <= 1} style={{ width: 26, height: 26, borderRadius: 8, border: `1px solid ${C.line}`, background: C.surface, cursor: viewDay <= 1 ? "default" : "pointer", color: viewDay <= 1 ? C.inkFaint : C.ink }}>‹</button>
+            <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 17, fontWeight: 600, color: C.ink }}>{isToday ? `Day ${viewDay} of ${TOTAL_DAYS}` : `Day ${viewDay}`}</span>
+            <button onClick={() => setViewDay(d => Math.min(todayNum, d + 1))} disabled={isToday} style={{ width: 26, height: 26, borderRadius: 8, border: `1px solid ${C.line}`, background: C.surface, cursor: isToday ? "default" : "pointer", color: isToday ? C.inkFaint : C.ink }}>›</button>
           </div>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: C.gold }}>{earned}/{MAX_DAILY_POINTS} {isToday ? "today" : ""}</span>
         </div>
-      ))}
-      <button onClick={handleSave} disabled={saving} style={{ marginTop: 6, width: "100%", padding: "15px", borderRadius: 12, border: "none", background: saved ? C.jungle : C.ink, color: C.paper, fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 600, cursor: "pointer" }}>
-        {saving ? "Saving…" : saved ? "Saved ✓" : "Save today's check-in"}
-      </button>
+        {!isToday && (
+          <div style={{ fontSize: 12, color: C.inkFaint, marginBottom: 10 }}>
+            Editing {dateForDay(viewDay)} · <button onClick={() => setViewDay(todayNum)} style={{ border: "none", background: "none", color: C.gold, cursor: "pointer", padding: 0, fontSize: 12, textDecoration: "underline" }}>jump to today</button>
+          </div>
+        )}
+        <Trail day={viewDay} />
+      </div>
+
+      {loading ? (
+        <div style={{ color: C.inkFaint, fontSize: 13 }}>Loading…</div>
+      ) : (
+        <React.Fragment>
+          {PILLARS.map(pillar => (
+            <div key={pillar.id} style={{ marginBottom: 22 }}>
+              <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 12, fontWeight: 600, color: C.inkFaint, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>{pillar.label}</div>
+              <div>
+                {pillar.habits.map((h, i) => (
+                  <HabitRow key={h.id} habit={h} value={values[h.id]} onChange={(v) => set(h.id, v)} last={i === pillar.habits.length - 1} userId={session.user.id} day={viewDay} />
+                ))}
+              </div>
+            </div>
+          ))}
+          <button onClick={handleSave} disabled={saving} style={{ marginTop: 6, width: "100%", padding: "15px", borderRadius: 12, border: "none", background: saved ? C.jungle : C.ink, color: C.paper, fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 600, cursor: "pointer" }}>
+            {saving ? "Saving…" : saved ? "Saved ✓" : isToday ? "Save today's check-in" : `Save Day ${viewDay}`}
+          </button>
+        </React.Fragment>
+      )}
     </div>
   );
 }
