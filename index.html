@@ -53,7 +53,7 @@ const PILLARS = [
     { id: "steps", label: "Steps", type: "number", points: 1, unit: "steps", target: 10000, step: 500, hint: "10,000 a day" },
     { id: "sleep", label: "Sleep", type: "number", points: 2, unit: "hrs", scoredByCoach: true, step: 0.25, hint: "Log your hours — your coach scores this one" },
     { id: "hydration", label: "Hydration", type: "number", points: 1, unit: "glasses", target: 8, step: 1, hint: "8–10 glasses" },
-    { id: "nutrition", label: "Nutrition log", type: "photo", points: 1, hint: "Photo of today's meals" },
+    { id: "nutrition", label: "Nutrition log", type: "photos", points: 1, hint: "Add a photo for each meal or snack" },
     { id: "supplementation", label: "Supplementation", type: "toggle", points: 2, hint: "Vitamin B12 and B3" },
     { id: "malasana", label: "Malasana & sun exposure", type: "toggle", points: 1, hint: "Daily hold, plus 5 min sun exposure" },
   ]},
@@ -74,6 +74,7 @@ function defaultPointsForHabit(h, v) {
   if (h.type === "toggle") return v ? h.points : 0;
   if (h.type === "number") return Number(v || 0) >= h.target ? h.points : 0;
   if (h.type === "photo") return v ? h.points : 0;
+  if (h.type === "photos") return v && v.length > 0 ? h.points : 0;
   return 0;
 }
 // Merge stored per-habit overrides with computed defaults.
@@ -87,12 +88,18 @@ function resolveHabitPoints(values, habitPoints) {
 function sumPoints(pointsMap) { return Object.values(pointsMap).reduce((s, p) => s + Number(p || 0), 0); }
 
 const START_DATE = new Date("2026-08-03T00:00:00");
+function formatLocalDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 function dateForDay(d) {
   const dt = new Date(START_DATE.getTime() + (d - 1) * 86400000);
-  return dt.toISOString().slice(0, 10);
+  return formatLocalDate(dt);
 }
 
-function todayStr() { return new Date().toISOString().slice(0, 10); }
+function todayStr() { return formatLocalDate(new Date()); }
 function dayNumberFor(dateStr) {
   const d = new Date(dateStr + "T00:00:00");
   return Math.floor((d - START_DATE) / 86400000) + 1;
@@ -136,6 +143,49 @@ function Toggle({ checked, onChange }) {
   );
 }
 
+function PhotoGallery({ value, onChange, userId, day }) {
+  const photos = value || [];
+  const [uploading, setUploading] = useState(false);
+  const inputId = useMemo(() => "gallery-" + Math.random().toString(36).slice(2), []);
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    const path = `${userId}/day-${day}-${Date.now()}.jpg`;
+    const { error } = await sb.storage.from("nutrition-photos").upload(path, file, { upsert: true });
+    if (!error) {
+      const { data } = sb.storage.from("nutrition-photos").getPublicUrl(path);
+      onChange([...photos, data.publicUrl]);
+    } else {
+      alert("Photo upload failed: " + error.message);
+    }
+    setUploading(false);
+    e.target.value = "";
+  };
+  const removePhoto = (idx) => onChange(photos.filter((_, i) => i !== idx));
+
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxWidth: 160, justifyContent: "flex-end" }}>
+      {photos.map((url, i) => (
+        <div key={i} style={{ position: "relative" }}>
+          <img src={url} alt={`Meal ${i + 1}`} style={{ width: 36, height: 36, borderRadius: 7, objectFit: "cover" }} />
+          <button onClick={() => removePhoto(i)} style={{
+            position: "absolute", top: -5, right: -5, width: 15, height: 15, borderRadius: "50%",
+            background: C.brick, color: "#fff", border: "none", fontSize: 9, lineHeight: "15px", padding: 0, cursor: "pointer",
+          }}>×</button>
+        </div>
+      ))}
+      <label htmlFor={inputId} style={{ cursor: "pointer" }}>
+        <input id={inputId} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFile} />
+        <div style={{ width: 36, height: 36, borderRadius: 7, border: `1.5px dashed ${C.inkFaint}`, display: "flex", alignItems: "center", justifyContent: "center", color: C.inkFaint, fontSize: 15 }}>
+          {uploading ? "…" : "+"}
+        </div>
+      </label>
+    </div>
+  );
+}
+
 function PhotoTile({ value, onChange, userId, day }) {
   const [uploading, setUploading] = useState(false);
   const inputId = useMemo(() => "photo-" + Math.random().toString(36).slice(2), []);
@@ -171,14 +221,22 @@ function HabitRow({ habit, value, onChange, last, userId, day }) {
   const done = habit.scoredByCoach ? Number(value || 0) > 0
     : habit.type === "toggle" ? !!value
     : habit.type === "number" ? Number(value || 0) >= habit.target
+    : habit.type === "photos" ? !!(value && value.length > 0)
     : !!value;
+  const isPhotoType = habit.type === "photo" || habit.type === "photos";
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 0", borderBottom: last ? "none" : `1px solid ${C.line}` }}>
-      <Toggle checked={done} onChange={(v) => {
-        if (habit.type === "toggle") onChange(v);
-        else if (habit.type === "number" && !habit.scoredByCoach) onChange(v ? habit.target : 0);
-        else onChange(v);
-      }} />
+      {isPhotoType ? (
+        <span style={{ width: 24, height: 24, borderRadius: "50%", flexShrink: 0, border: `1.5px solid ${done ? C.jungle : C.inkFaint}`, background: done ? C.jungle : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {done && <span style={{ color: C.surface, fontSize: 13, fontWeight: 700 }}>✓</span>}
+        </span>
+      ) : (
+        <Toggle checked={done} onChange={(v) => {
+          if (habit.type === "toggle") onChange(v);
+          else if (habit.type === "number" && !habit.scoredByCoach) onChange(v ? habit.target : 0);
+          else onChange(v);
+        }} />
+      )}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
           <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 500, color: C.ink }}>{habit.label}</span>
@@ -198,6 +256,7 @@ function HabitRow({ habit, value, onChange, last, userId, day }) {
         </div>
       )}
       {habit.type === "photo" && <PhotoTile value={value} onChange={onChange} userId={userId} day={day} />}
+      {habit.type === "photos" && <PhotoGallery value={value} onChange={onChange} userId={userId} day={day} />}
     </div>
   );
 }
@@ -217,6 +276,7 @@ function RecapRow({ habit, value }) {
   const done = habit.scoredByCoach ? Number(value || 0) > 0
     : habit.type === "toggle" ? !!value
     : habit.type === "number" ? Number(value || 0) >= habit.target
+    : habit.type === "photos" ? !!(value && value.length > 0)
     : !!value;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0" }}>
@@ -273,9 +333,11 @@ function RecapCard({ values, day, earned }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 20 }}>
           {ALL_HABITS.map(h => <RecapRow key={h.id} habit={h} value={values[h.id]} />)}
         </div>
-        {photo && (
-          <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 10 }}>
-            <img src={photo} alt="Meal log" crossOrigin="anonymous" style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover" }} />
+        {photo && photo.length > 0 && (
+          <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            {photo.map((url, i) => (
+              <img key={i} src={url} alt={`Meal ${i + 1}`} crossOrigin="anonymous" style={{ width: 40, height: 40, borderRadius: 8, objectFit: "cover" }} />
+            ))}
             <span style={{ fontSize: 12, color: C.inkFaint }}>Today's nutrition log</span>
           </div>
         )}
@@ -312,7 +374,7 @@ function CheckIn({ session }) {
         setValues({
           meditation: data.meditation, journaling: data.journaling, pranayama: data.pranayama, training: data.training,
           steps: data.steps || "", sleep: data.sleep || "", hydration: data.hydration || "",
-          nutrition: data.nutrition_photo_url, supplementation: data.supplementation, malasana: data.malasana,
+          nutrition: data.nutrition_photos || [], supplementation: data.supplementation, malasana: data.malasana,
           reading: data.reading || "", screentime: data.screentime,
         });
         setHabitPoints(data.habit_points || {});
@@ -335,7 +397,7 @@ function CheckIn({ session }) {
       user_id: session.user.id, day: dateForDay(viewDay),
       meditation: !!values.meditation, journaling: !!values.journaling, pranayama: !!values.pranayama, training: !!values.training,
       steps: Number(values.steps || 0), sleep: Number(values.sleep || 0), hydration: Number(values.hydration || 0),
-      nutrition_photo_url: values.nutrition || null, supplementation: !!values.supplementation, malasana: !!values.malasana,
+      nutrition_photos: values.nutrition || [], supplementation: !!values.supplementation, malasana: !!values.malasana,
       reading: Number(values.reading || 0), screentime: !!values.screentime,
       habit_points: newHabitPoints, points: sumPoints(newHabitPoints),
     };
@@ -435,7 +497,7 @@ function ReportCard({ session }) {
     if (!c) return {};
     return {
       meditation: c.meditation, journaling: c.journaling, pranayama: c.pranayama, training: c.training,
-      steps: c.steps, sleep: c.sleep, hydration: c.hydration, nutrition: c.nutrition_photo_url,
+      steps: c.steps, sleep: c.sleep, hydration: c.hydration, nutrition: c.nutrition_photos || [],
       supplementation: c.supplementation, malasana: c.malasana, reading: c.reading, screentime: c.screentime,
     };
   }, [byDay, recapDay]);
@@ -524,6 +586,8 @@ function AdminHabitRow({ habit, value, onChangeValue, points, onChangePoints, us
           style={{ width: 64, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 8, padding: "5px 7px", color: C.ink, fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, textAlign: "right" }} />
       ) : habit.type === "photo" ? (
         <PhotoTile value={value} onChange={onChangeValue} userId={userId} day={day} />
+      ) : habit.type === "photos" ? (
+        <PhotoGallery value={value} onChange={onChangeValue} userId={userId} day={day} />
       ) : (
         <Toggle checked={!!value} onChange={onChangeValue} />
       )}
@@ -551,7 +615,7 @@ function AdminDayEditor({ client, day, setDay }) {
       const newValues = data ? {
         meditation: data.meditation, journaling: data.journaling, pranayama: data.pranayama, training: data.training,
         steps: data.steps || "", sleep: data.sleep || "", hydration: data.hydration || "",
-        nutrition: data.nutrition_photo_url, supplementation: data.supplementation, malasana: data.malasana,
+        nutrition: data.nutrition_photos || [], supplementation: data.supplementation, malasana: data.malasana,
         reading: data.reading || "", screentime: data.screentime,
       } : {};
       setValues(newValues);
@@ -584,7 +648,7 @@ function AdminDayEditor({ client, day, setDay }) {
       user_id: client.id, day: dateForDay(day),
       meditation: !!values.meditation, journaling: !!values.journaling, pranayama: !!values.pranayama, training: !!values.training,
       steps: Number(values.steps || 0), sleep: Number(values.sleep || 0), hydration: Number(values.hydration || 0),
-      nutrition_photo_url: values.nutrition || null, supplementation: !!values.supplementation, malasana: !!values.malasana,
+      nutrition_photos: values.nutrition || [], supplementation: !!values.supplementation, malasana: !!values.malasana,
       reading: Number(values.reading || 0), screentime: !!values.screentime,
       habit_points: habitPoints, points: earned,
     };
