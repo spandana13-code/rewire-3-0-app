@@ -804,10 +804,70 @@ function WeekBar({ week, points, onClick }) {
   );
 }
 
+const thStyle = { padding: "8px 10px", fontSize: 10, color: C.inkFaint, textTransform: "uppercase", letterSpacing: 0.5, textAlign: "left", borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap" };
+const tdStyle = { padding: "8px 10px", borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap" };
+
+function WeekTable({ weekNum, day, byDay }) {
+  const start = (weekNum - 1) * 7 + 1;
+  const end = Math.min(start + 6, day);
+  const rows = [];
+  for (let d = start; d <= end; d++) rows.push(d);
+
+  const cellColor = (pts, max) => {
+    if (pts === undefined || pts === null) return C.line;
+    if (max <= 0) return pts > 0 ? C.jungle : C.line;
+    const pct = pts / max;
+    if (pct >= 1) return C.jungle;
+    if (pct <= 0) return C.brick;
+    return C.gold;
+  };
+
+  return (
+    <div style={{ overflowX: "auto", marginTop: 12, border: `1px solid ${C.line}`, borderRadius: 12 }}>
+      <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 760 }}>
+        <thead>
+          <tr>
+            <th style={{ ...thStyle, position: "sticky", left: 0, background: C.surface }}>Day</th>
+            {ALL_HABITS.map(h => <th key={h.id} style={thStyle}>{h.label}</th>)}
+            <th style={thStyle}>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(d => {
+            const c = byDay[d];
+            const hp = c?.habit_points || {};
+            return (
+              <tr key={d}>
+                <td style={{ ...tdStyle, position: "sticky", left: 0, background: C.surface, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif", fontSize: 12 }}>Day {d}</td>
+                {ALL_HABITS.map(h => {
+                  const pts = hp[h.id];
+                  return (
+                    <td key={h.id} style={tdStyle}>
+                      {c ? (
+                        <span style={{ display: "inline-block", minWidth: 26, padding: "3px 8px", borderRadius: 20, background: cellColor(pts, h.points), color: "#fff", fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, textAlign: "center" }}>
+                          {pts ?? 0}
+                        </span>
+                      ) : (
+                        <span style={{ color: C.inkFaint, fontSize: 11 }}>—</span>
+                      )}
+                    </td>
+                  );
+                })}
+                <td style={{ ...tdStyle, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 12, color: C.ink }}>{c ? c.points : "—"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function WeeklyBreakdown({ client, onJumpWeek }) {
   const [checkins, setCheckins] = useState([]);
   const [physique, setPhysique] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [expandedWeek, setExpandedWeek] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -844,23 +904,28 @@ function WeeklyBreakdown({ client, onJumpWeek }) {
   return (
     <div style={{ marginTop: 24, borderTop: `1px solid ${C.line}`, paddingTop: 20 }}>
       <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 600, color: C.ink, marginBottom: 4 }}>Weekly breakdown</div>
-      <div style={{ fontSize: 11, color: C.inkFaint, marginBottom: 16 }}>Tap a bar or a week to jump the day editor there.</div>
+      <div style={{ fontSize: 11, color: C.inkFaint, marginBottom: 16 }}>Tap a bar or a week to see the day-by-day table.</div>
 
       <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 130, marginBottom: 8 }}>
-        {weeks.map(w => <WeekBar key={w.week} week={w.week} points={w.points} onClick={() => onJumpWeek(w.week)} />)}
+        {weeks.map(w => (
+          <WeekBar key={w.week} week={w.week} points={w.points} onClick={() => { setExpandedWeek(x => x === w.week ? null : w.week); onJumpWeek(w.week); }} />
+        ))}
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
         {weeks.filter(w => w.points !== null).map(w => (
-          <div key={w.week} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <button onClick={() => onJumpWeek(w.week)} style={{ width: 44, fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: C.inkSoft, background: "none", border: "none", cursor: "pointer", textAlign: "left", padding: 0 }}>Wk {w.week}</button>
-            <div style={{ display: "flex", gap: 3 }}>
-              {w.dayStatuses.map(ds => (
-                <span key={ds.d} title={`Day ${ds.d}`} style={{ width: 8, height: 8, borderRadius: 2, background: ds.done ? C.jungle : C.line }} />
-              ))}
+          <div key={w.week}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <button onClick={() => { setExpandedWeek(x => x === w.week ? null : w.week); onJumpWeek(w.week); }} style={{ width: 44, fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: expandedWeek === w.week ? C.gold : C.inkSoft, background: "none", border: "none", cursor: "pointer", textAlign: "left", padding: 0, fontWeight: expandedWeek === w.week ? 700 : 400 }}>Wk {w.week}</button>
+              <div style={{ display: "flex", gap: 3 }}>
+                {w.dayStatuses.map(ds => (
+                  <span key={ds.d} title={`Day ${ds.d}`} style={{ width: 8, height: 8, borderRadius: 2, background: ds.done ? C.jungle : C.line }} />
+                ))}
+              </div>
+              <div style={{ flex: 1 }} />
+              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: w.points >= WEEKLY_TARGET ? C.jungle : w.points < 50 ? C.brick : C.ink }}>{w.points}/{WEEKLY_TARGET}</span>
             </div>
-            <div style={{ flex: 1 }} />
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: w.points >= WEEKLY_TARGET ? C.jungle : w.points < 50 ? C.brick : C.ink }}>{w.points}/{WEEKLY_TARGET}</span>
+            {expandedWeek === w.week && <WeekTable weekNum={w.week} day={day} byDay={byDay} />}
           </div>
         ))}
       </div>
