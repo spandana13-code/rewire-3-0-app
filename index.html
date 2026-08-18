@@ -65,6 +65,30 @@ const PILLARS = [
 const ALL_HABITS = PILLARS.flatMap(p => p.habits);
 const MAX_DAILY_POINTS = ALL_HABITS.reduce((s, h) => s + h.points, 0);
 const WEEKLY_TARGET = 100;
+// Each habit's weekly points cap at roughly a 5.5-day equivalent, per the original design —
+// so a perfect 7-day week doesn't exceed the target, it just hits it comfortably.
+const WEEKLY_CAP = {
+  meditation: 10, journaling: 10, pranayama: 5, training: 10, steps: 5,
+  sleep: 10, hydration: 5, nutrition: 5, supplementation: 10, malasana: 5,
+  reading: 10, screentime: 10,
+};
+// Sums a week's daily rows into a capped weekly total (plus that week's physique points).
+// Falls back to raw daily points for any older rows saved before per-habit breakdowns existed.
+function weeklyPointsFromRows(rows, physiquePoints) {
+  const perHabit = {};
+  ALL_HABITS.forEach(h => { perHabit[h.id] = 0; });
+  let fallback = 0;
+  rows.forEach(r => {
+    if (r.habit_points && Object.keys(r.habit_points).length > 0) {
+      ALL_HABITS.forEach(h => { perHabit[h.id] += Number(r.habit_points[h.id] || 0); });
+    } else {
+      fallback += r.points || 0;
+    }
+  });
+  let total = fallback;
+  ALL_HABITS.forEach(h => { total += Math.min(perHabit[h.id], WEEKLY_CAP[h.id]); });
+  return total + Number(physiquePoints || 0);
+}
 const TOTAL_DAYS = 60;
 
 // Default points for a habit given its logged value.
@@ -470,7 +494,6 @@ function ReportCard({ session }) {
 
   const byDay = useMemo(() => { const m = {}; checkins.forEach(c => m[dayNumberFor(c.day)] = c); return m; }, [checkins]);
   const byWeek = useMemo(() => { const m = {}; weeklyPhysique.forEach(w => m[w.week] = w); return m; }, [weeklyPhysique]);
-  const totalPoints = checkins.reduce((s, c) => s + (c.points || 0), 0) + weeklyPhysique.reduce((s, w) => s + (w.points || 0), 0);
 
   let streak = 0;
   for (let d = day; d >= 1; d--) { const c = byDay[d]; if (c && c.points > 0) streak++; else break; }
@@ -486,11 +509,12 @@ function ReportCard({ session }) {
     const wk = w + 1;
     const start = w * 7 + 1;
     if (start > day) return { week: wk, points: null };
-    let sum = 0;
-    for (let d = start; d <= Math.min(start + 6, day); d++) { const c = byDay[d]; if (c) sum += c.points || 0; }
-    sum += byWeek[wk]?.points || 0;
-    return { week: wk, points: sum };
+    const rows = [];
+    for (let d = start; d <= Math.min(start + 6, day); d++) { if (byDay[d]) rows.push(byDay[d]); }
+    return { week: wk, points: weeklyPointsFromRows(rows, byWeek[wk]?.points) };
   });
+
+  const totalPoints = weeks.reduce((s, w) => s + (w.points || 0), 0);
 
   const recapValues = useMemo(() => {
     const c = byDay[recapDay];
@@ -756,8 +780,97 @@ function AdminWeeklyPhysique({ client }) {
   );
 }
 
+function WeekBar({ week, points, onClick }) {
+  const [grown, setGrown] = useState(false);
+  useEffect(() => {
+    if (points === null) return;
+    const t = setTimeout(() => setGrown(true), 50 + week * 60);
+    return () => clearTimeout(t);
+  }, [points]);
+  const pct = points === null ? 0 : Math.min(100, (points / WEEKLY_TARGET) * 100);
+  const color = points === null ? C.line : points >= WEEKLY_TARGET ? C.jungle : points >= 50 ? C.gold : C.brick;
+  return (
+    <div onClick={() => points !== null && onClick()} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, cursor: points !== null ? "pointer" : "default", flex: 1 }}>
+      <div style={{ width: "100%", height: 110, display: "flex", alignItems: "flex-end" }}>
+        <div style={{
+          width: "100%", borderRadius: "6px 6px 0 0",
+          height: points === null ? "3%" : grown ? `${Math.max(pct, points > 0 ? 4 : 2)}%` : "0%",
+          background: color, opacity: points === null ? 0.4 : 1,
+          transition: "height 0.7s cubic-bezier(.22,1,.36,1)",
+        }} />
+      </div>
+      <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: points === null ? C.inkFaint : C.ink }}>W{week}</span>
+    </div>
+  );
+}
+
+function WeeklyBreakdown({ client, onJumpWeek }) {
+  const [checkins, setCheckins] = useState([]);
+  const [physique, setPhysique] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const [{ data: dc }, { data: wc }] = await Promise.all([
+        sb.from("daily_checkins").select("*").eq("user_id", client.id),
+        sb.from("weekly_checkins").select("*").eq("user_id", client.id),
+      ]);
+      setCheckins(dc || []);
+      setPhysique(wc || []);
+      setLoading(false);
+    })();
+  }, [client.id]);
+
+  const day = currentDay();
+  const byDay = useMemo(() => { const m = {}; checkins.forEach(c => m[dayNumberFor(c.day)] = c); return m; }, [checkins]);
+  const byWeek = useMemo(() => { const m = {}; physique.forEach(w => m[w.week] = w); return m; }, [physique]);
+
+  const weeks = useMemo(() => Array.from({ length: 8 }, (_, i) => {
+    const wk = i + 1;
+    const start = i * 7 + 1;
+    if (start > day) return { week: wk, points: null, dayStatuses: [] };
+    const rows = [];
+    const dayStatuses = [];
+    for (let d = start; d <= Math.min(start + 6, day); d++) {
+      const c = byDay[d];
+      if (c) rows.push(c);
+      dayStatuses.push({ d, done: !!(c && c.points > 0) });
+    }
+    return { week: wk, points: weeklyPointsFromRows(rows, byWeek[wk]?.points), dayStatuses };
+  }), [byDay, byWeek, day]);
+
+  if (loading) return <div style={{ color: C.inkFaint, fontSize: 13, marginTop: 24 }}>Loading weekly breakdown…</div>;
+
+  return (
+    <div style={{ marginTop: 24, borderTop: `1px solid ${C.line}`, paddingTop: 20 }}>
+      <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 600, color: C.ink, marginBottom: 4 }}>Weekly breakdown</div>
+      <div style={{ fontSize: 11, color: C.inkFaint, marginBottom: 16 }}>Tap a bar or a week to jump the day editor there.</div>
+
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 130, marginBottom: 8 }}>
+        {weeks.map(w => <WeekBar key={w.week} week={w.week} points={w.points} onClick={() => onJumpWeek(w.week)} />)}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
+        {weeks.filter(w => w.points !== null).map(w => (
+          <div key={w.week} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button onClick={() => onJumpWeek(w.week)} style={{ width: 44, fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: C.inkSoft, background: "none", border: "none", cursor: "pointer", textAlign: "left", padding: 0 }}>Wk {w.week}</button>
+            <div style={{ display: "flex", gap: 3 }}>
+              {w.dayStatuses.map(ds => (
+                <span key={ds.d} title={`Day ${ds.d}`} style={{ width: 8, height: 8, borderRadius: 2, background: ds.done ? C.jungle : C.line }} />
+              ))}
+            </div>
+            <div style={{ flex: 1 }} />
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: w.points >= WEEKLY_TARGET ? C.jungle : w.points < 50 ? C.brick : C.ink }}>{w.points}/{WEEKLY_TARGET}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ClientDetail({ client, onBack }) {
   const [day, setDay] = useState(client.day);
+  const jumpToWeek = (wk) => setDay(Math.min(currentDay(), (wk - 1) * 7 + 1));
   return (
     <div>
       <button onClick={onBack} style={{ border: "none", background: "none", cursor: "pointer", padding: 0, marginBottom: 18, fontFamily: "'Space Grotesk', sans-serif", fontSize: 13, color: C.inkSoft }}>← All clients</button>
@@ -770,6 +883,7 @@ function ClientDetail({ client, onBack }) {
         <StatChip label="Streak" value={`${client.streak} days`} tone="jungle" />
         <StatChip label="This week" value={`${client.weekPts}/${WEEKLY_TARGET}`} />
       </div>
+      <WeeklyBreakdown client={client} onJumpWeek={jumpToWeek} />
       <AdminDayEditor client={client} day={day} setDay={setDay} />
       <AdminWeeklyPhysique client={client} />
     </div>
@@ -790,19 +904,28 @@ function AdminView() {
       ]);
       const day = currentDay();
       const today = todayStr();
-      const weekStart = Math.floor((day - 1) / 7) * 7 + 1;
       const currentWeekNum = weekForDay(day);
       const list = (profiles || []).map(p => {
         const rows = (checkins || []).filter(c => c.user_id === p.id);
         const physiqueRows = (physique || []).filter(w => w.user_id === p.id);
-        const physiqueTotal = physiqueRows.reduce((s, w) => s + (w.points || 0), 0);
-        const totalPoints = rows.reduce((s, c) => s + (c.points || 0), 0) + physiqueTotal;
         const checkedInToday = rows.some(c => c.day === today);
-        let weekPts = 0;
         const byDay = {};
-        rows.forEach(c => { const dn = dayNumberFor(c.day); byDay[dn] = c; if (dn >= weekStart && dn <= day) weekPts += c.points || 0; });
-        const thisWeekPhysique = physiqueRows.find(w => w.week === currentWeekNum);
-        weekPts += thisWeekPhysique?.points || 0;
+        rows.forEach(c => { byDay[dayNumberFor(c.day)] = c; });
+        const byWeek = {};
+        physiqueRows.forEach(w => { byWeek[w.week] = w; });
+
+        let totalPoints = 0;
+        let weekPts = 0;
+        for (let wk = 1; wk <= currentWeekNum; wk++) {
+          const start = (wk - 1) * 7 + 1;
+          const end = Math.min(start + 6, day);
+          const weekRows = [];
+          for (let d = start; d <= end; d++) { if (byDay[d]) weekRows.push(byDay[d]); }
+          const pts = weeklyPointsFromRows(weekRows, byWeek[wk]?.points);
+          totalPoints += pts;
+          if (wk === currentWeekNum) weekPts = pts;
+        }
+
         let streak = 0;
         for (let d = day; d >= 1; d--) { const c = byDay[d]; if (c && c.points > 0) streak++; else break; }
         return { id: p.id, name: p.name, phase: phaseForDay(day), day, weekPts, checkedInToday, totalPoints, streak };
